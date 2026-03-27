@@ -17,8 +17,18 @@ extern NSUserDefaults *tweakDefaults;
 }
 %new
 - (BOOL)isOn {
-  return [object_getIvar(
-      self, class_getInstanceVariable(object_getClass(self), "$__lazy_storage_$_switchView")) isOn];
+  Ivar switchViewIvar = class_getInstanceVariable(object_getClass(self), "$__lazy_storage_$_switchView");
+  if (!switchViewIvar) {
+    // Fallback: try to find the switch view in the cell's subviews
+    for (UIView *subview in self.subviews) {
+      if ([subview isKindOfClass:[UISwitch class]]) {
+        return [(UISwitch *)subview isOn];
+      }
+    }
+    return NO;
+  }
+  UISwitch *switchView = object_getIvar(self, switchViewIvar);
+  return switchView ? [switchView isOn] : NO;
 }
 %new
 - (void)configureWithTitle:(NSString *)title
@@ -28,10 +38,27 @@ extern NSUserDefaults *tweakDefaults;
     accessibilityIdentifier:(NSString *)accessibilityIdentifier {
   self.textLabel.text = title;
   self.detailTextLabel.text = subtitle;
-  UISwitch *switchView = object_getIvar(
-      self, class_getInstanceVariable(object_getClass(self), "$__lazy_storage_$_switchView"));
-  switchView.enabled = isEnabled;
-  switchView.on = isOn;
+  
+  Ivar switchViewIvar = class_getInstanceVariable(object_getClass(self), "$__lazy_storage_$_switchView");
+  UISwitch *switchView = nil;
+  
+  if (switchViewIvar) {
+    switchView = object_getIvar(self, switchViewIvar);
+  } else {
+    // Fallback: find the switch view in subviews
+    for (UIView *subview in self.subviews) {
+      if ([subview isKindOfClass:[UISwitch class]]) {
+        switchView = (UISwitch *)subview;
+        break;
+      }
+    }
+  }
+  
+  if (switchView) {
+    switchView.enabled = isEnabled;
+    switchView.on = isOn;
+  }
+  
   self.accessibilityIdentifier = accessibilityIdentifier;
 }
 - (void)settingsSwitchToggled {
@@ -117,11 +144,15 @@ extern NSUserDefaults *tweakDefaults;
           cell = [[objc_getClass("TWAdBlockSettingsTextFieldTableViewCell") alloc]
                 initWithStyle:UITableViewCellStyleDefault
               reuseIdentifier:@"TWAdBlockProxy"];
-          TWAdBlockSettingsTextField *textField =
-              ((TWAdBlockSettingsTextFieldTableViewCell *)cell).textField;
-          textField.textField.placeholder = PROXY_ADDR;
-          textField.textField.text = [tweakDefaults stringForKey:@"TWAdBlockProxy"];
-          textField.delegate = self;
+          if (cell) {
+            TWAdBlockSettingsTextField *textField =
+                ((TWAdBlockSettingsTextFieldTableViewCell *)cell).textField;
+            if (textField && textField.textField) {
+              textField.textField.placeholder = PROXY_ADDR;
+              textField.textField.text = [tweakDefaults stringForKey:@"TWAdBlockProxy"];
+              textField.delegate = self;
+            }
+          }
           return cell;
       }
     default:
@@ -142,10 +173,13 @@ extern NSUserDefaults *tweakDefaults;
     case 2: {
       _TtC6Twitch12VersionLabel *versionLabel =
           [[objc_getClass("_TtC6Twitch12VersionLabel") alloc] initWithFrame:CGRectZero];
-      versionLabel.text = @"TwitchAdBlock v" PACKAGE_VERSION;
-      UIStackView *footerStackView =
-          [[UIStackView alloc] initWithArrangedSubviews:@[ versionLabel ]];
-      return footerStackView;
+      if (versionLabel) {
+        versionLabel.text = @"TwitchAdBlock v" PACKAGE_VERSION;
+        UIStackView *footerStackView =
+            [[UIStackView alloc] initWithArrangedSubviews:@[ versionLabel ]];
+        return footerStackView;
+      }
+      return nil;
     }
     default:
       return nil;
@@ -157,35 +191,43 @@ extern NSUserDefaults *tweakDefaults;
   return footerView;
 }
 %new
-- (void)settingsCellSwitchToggled:(UISwitch *)sender {
-  if ([sender.accessibilityIdentifier isEqualToString:@"AdBlockSwitchCell"]) {
-    [tweakDefaults setBool:sender.isOn forKey:@"TWAdBlockEnabled"];
-    self.adblockEnabled = sender.isOn;
+- (void)settingsCellSwitchToggled:(id)sender {
+  if (![sender isKindOfClass:objc_getClass("_TtC6Twitch27SettingsSwitchTableViewCell")]) {
+    return;
+  }
+  
+  _TtC6Twitch27SettingsSwitchTableViewCell *cell = (_TtC6Twitch27SettingsSwitchTableViewCell *)sender;
+  NSString *accessibilityIdentifier = cell.accessibilityIdentifier;
+  BOOL isOn = cell.isOn;
+  
+  if ([accessibilityIdentifier isEqualToString:@"AdBlockSwitchCell"]) {
+    [tweakDefaults setBool:isOn forKey:@"TWAdBlockEnabled"];
+    self.adblockEnabled = isOn;
 
     NSIndexSet *sections = [NSIndexSet indexSetWithIndex:1];
-    if (sender.isOn)
+    if (isOn)
       [self.tableView insertSections:sections withRowAnimation:UITableViewRowAnimationFade];
     else
       [self.tableView deleteSections:sections withRowAnimation:UITableViewRowAnimationFade];
-  } else if ([sender.accessibilityIdentifier isEqualToString:@"AdBlockProxySwitchCell"]) {
-    [tweakDefaults setBool:sender.isOn forKey:@"TWAdBlockProxyEnabled"];
-    self.proxyEnabled = sender.isOn;
+  } else if ([accessibilityIdentifier isEqualToString:@"AdBlockProxySwitchCell"]) {
+    [tweakDefaults setBool:isOn forKey:@"TWAdBlockProxyEnabled"];
+    self.proxyEnabled = isOn;
 
     NSMutableArray *indexPaths = [NSMutableArray array];
     [indexPaths addObject:[NSIndexPath indexPathForRow:1 inSection:1]];
     if (self.customProxyEnabled) [indexPaths addObject:[NSIndexPath indexPathForRow:2 inSection:1]];
-    if (sender.isOn)
+    if (isOn)
       [self.tableView insertRowsAtIndexPaths:indexPaths
                             withRowAnimation:UITableViewRowAnimationFade];
     else
       [self.tableView deleteRowsAtIndexPaths:indexPaths
                             withRowAnimation:UITableViewRowAnimationFade];
-  } else if ([sender.accessibilityIdentifier isEqualToString:@"AdBlockCustomProxySwitchCell"]) {
-    [tweakDefaults setBool:sender.isOn forKey:@"TWAdBlockCustomProxyEnabled"];
-    self.customProxyEnabled = sender.isOn;
+  } else if ([accessibilityIdentifier isEqualToString:@"AdBlockCustomProxySwitchCell"]) {
+    [tweakDefaults setBool:isOn forKey:@"TWAdBlockCustomProxyEnabled"];
+    self.customProxyEnabled = isOn;
 
     NSArray *indexPaths = @[ [NSIndexPath indexPathForRow:2 inSection:1] ];
-    if (sender.isOn)
+    if (isOn)
       [self.tableView insertRowsAtIndexPaths:indexPaths
                             withRowAnimation:UITableViewRowAnimationFade];
     else
