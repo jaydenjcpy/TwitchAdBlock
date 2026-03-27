@@ -1,0 +1,37 @@
+name: Build DEB
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup theos
+        uses: level3tjg/theos-action@main
+        with:
+          cache: true
+
+      - name: Build rootless deb
+        run: make package
+        env:
+          THEOS_PACKAGE_SCHEME: rootless
+          FINALPACKAGE: 1
+
+      - name: Build rootful deb
+        run: make clean package
+        env:
+          FINALPACKAGE: 1
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TwitchAdBlock-Fixed-Debs
+          path: packages/*.deb
